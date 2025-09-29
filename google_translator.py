@@ -40,9 +40,20 @@ class GoogleTranslator:
         # デプロイメント環境では常にフォールバック辞書を優先使用
         # Streamlit Cloudでのgoogletransライブラリの不安定性を回避
         import os
-        is_deployment = os.environ.get('STREAMLIT_SHARING_MODE') or os.environ.get('STREAMLIT_CLOUD_MODE')
+        import platform
 
-        if is_deployment:
+        # 複数の方法でデプロイメント環境を検出
+        is_deployment = (
+            os.environ.get('STREAMLIT_SHARING_MODE') or
+            os.environ.get('STREAMLIT_CLOUD_MODE') or
+            os.environ.get('STREAMLIT_SERVER_PORT') or
+            'streamlit' in os.environ.get('PATH', '').lower() or
+            platform.system() == 'Linux'  # Streamlit CloudはLinux環境
+        )
+
+        # 強制的にフォールバックモードを使用（Streamlit Cloud対応）
+        print(f"[DEBUG] Environment check: deployment={is_deployment}, platform={platform.system()}")
+        if is_deployment or True:  # 一時的に常にフォールバックを使用
             print("[DEPLOYMENT] Using fallback-only mode for cloud deployment reliability")
             return self._fallback_translation(japanese_text)
 
