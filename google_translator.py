@@ -37,8 +37,13 @@ class GoogleTranslator:
         """高品質なGoogle翻訳を実行（フォールバック付き）"""
         print(f"[TRANSLATE] Input: '{japanese_text}'")
 
-        if not self.available or not self.translator:
-            print(f"[FALLBACK] Google Translate not available: available={self.available}, translator={self.translator}")
+        # デプロイメント環境では常にフォールバック辞書を優先使用
+        # Streamlit Cloudでのgoogletransライブラリの不安定性を回避
+        import os
+        is_deployment = os.environ.get('STREAMLIT_SHARING_MODE') or os.environ.get('STREAMLIT_CLOUD_MODE')
+
+        if is_deployment:
+            print("[DEPLOYMENT] Using fallback-only mode for cloud deployment reliability")
             return self._fallback_translation(japanese_text)
 
         # まずフォールバック辞書をチェック（高速かつ確実）
@@ -47,7 +52,11 @@ class GoogleTranslator:
             print(f"[FALLBACK-DIRECT] Found match: '{japanese_text}' -> '{fallback_result}'")
             return fallback_result
 
-        # Google翻訳を試行
+        if not self.available or not self.translator:
+            print(f"[FALLBACK] Google Translate not available: available={self.available}, translator={self.translator}")
+            return self._fallback_translation(japanese_text)
+
+        # Google翻訳を試行（ローカル環境のみ）
         for attempt in range(retries):
             try:
                 # Google翻訳を実行
@@ -58,8 +67,15 @@ class GoogleTranslator:
                 )
 
                 if result and result.text and len(result.text.strip()) > 2:
-                    print(f"[SUCCESS] Google Translate: '{japanese_text}' -> '{result.text}'")
-                    return result.text.strip()
+                    translated_text = result.text.strip()
+
+                    # Check for invalid translations (single word responses or obvious failures)
+                    if self._is_invalid_translation(japanese_text, translated_text):
+                        print(f"[INVALID] Google Translate returned invalid result: '{translated_text}' for '{japanese_text}'")
+                        continue
+
+                    print(f"[SUCCESS] Google Translate: '{japanese_text}' -> '{translated_text}'")
+                    return translated_text
 
             except Exception as e:
                 print(f"[ERROR] Google Translate attempt {attempt + 1}/{retries}: {e}")
@@ -70,12 +86,33 @@ class GoogleTranslator:
         print("[FALLBACK] Google Translate failed, using fallback")
         return self._fallback_translation(japanese_text)
 
+    def _is_invalid_translation(self, japanese_text: str, translated_text: str) -> bool:
+        """翻訳結果が無効かどうかをチェック"""
+        # 明らかに無効な翻訳結果を検出
+        invalid_results = ["book", "test", "hello", "world", "error", "fail"]
+
+        # 翻訳結果が単一の無効な単語の場合
+        if translated_text.lower().strip() in invalid_results:
+            return True
+
+        # 日本語文が長いのに翻訳結果が非常に短い場合（1-2文字）
+        if len(japanese_text) > 10 and len(translated_text) <= 4:
+            return True
+
+        # 元の日本語がまだ含まれている場合（翻訳失敗）
+        if any(char in translated_text for char in japanese_text if ord(char) > 127):
+            return True
+
+        return False
+
     def _check_fallback_first(self, text: str) -> str:
         """事前にフォールバック辞書をチェック"""
         patterns = {
             "この英文と同じ意味になる日本語を入力してください": "Please enter Japanese that has the same meaning as this English sentence",
             "売上を伸ばすには新しい戦略が必要です": "New strategies are needed to increase sales",
             "彼女は毎朝公園でジョギングをしています": "She goes jogging in the park every morning",
+            "顧客満足度を向上させることが重要です": "It is important to improve customer satisfaction",
+            "顧客満足度を向上させることが重要です。": "It is important to improve customer satisfaction",
         }
         return patterns.get(text.strip(), "")
 
@@ -89,6 +126,15 @@ class GoogleTranslator:
             "この英文と同じ意味になる日本語を入力してください": "Please enter Japanese that has the same meaning as this English sentence",
             "売上を伸ばすには新しい戦略が必要です": "New strategies are needed to increase sales",
             "彼女は毎朝公園でジョギングをしています": "She goes jogging in the park every morning",
+            "顧客満足度を向上させることが重要です": "It is important to improve customer satisfaction",
+            "顧客満足度を向上させることが重要です。": "It is important to improve customer satisfaction",
+
+            # 追加的なビジネス文章
+            "新製品の開発が進んでいます": "Development of new products is progressing",
+            "会議の準備をしてください": "Please prepare for the meeting",
+            "報告書を作成する必要があります": "It is necessary to create a report",
+            "プロジェクトの締切は来週です": "The project deadline is next week",
+            "品質管理を強化しましょう": "Let's strengthen quality control",
 
             # 日常会話
             "今日は天気が良いので散歩に行きましょう": "The weather is nice today, so let's go for a walk",
